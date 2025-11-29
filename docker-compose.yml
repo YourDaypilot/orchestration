@@ -3,37 +3,102 @@ version: '3.8'
 services:
   orchestrator:
     build: .
+    container_name: daypilot-orchestrator
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://user:password@postgres:5432/daypilot
-      - REDIS_URL=redis://redis:6379
+      - DEBUG=false
+      - DATABASE_URL=postgresql://daypilot:password@postgres:5432/daypilot
+      - REDIS_URL=redis://redis:6379/0
+      - MONGODB_URL=mongodb://mongo:27017/daypilot
+    volumes:
+      - ./trace:/app/trace
+      - ./logs:/app/logs
     depends_on:
       - postgres
       - redis
-    volumes:
-      - ./:/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      - mongo
+    restart: unless-stopped
+    networks:
+      - daypilot-network
 
   postgres:
-    image: postgres:14-alpine
+    image: postgres:16-alpine
+    container_name: daypilot-postgres
     environment:
-      POSTGRES_DB: daypilot
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      - POSTGRES_USER=daypilot
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=daypilot
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - daypilot-network
 
   redis:
     image: redis:7-alpine
+    container_name: daypilot-redis
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes
     volumes:
-      - redis_data:/data
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - daypilot-network
+
+  mongo:
+    image: mongo:7
+    container_name: daypilot-mongo
+    environment:
+      - MONGO_INITDB_DATABASE=daypilot
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "27017:27017"
+    restart: unless-stopped
+    networks:
+      - daypilot-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: daypilot-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+    networks:
+      - daypilot-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: daypilot-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - daypilot-network
+
+networks:
+  daypilot-network:
+    driver: bridge
 
 volumes:
-  postgres_data:
-  redis_data:
+  postgres-data:
+  redis-data:
+  mongo-data:
+  prometheus-data:
+  grafana-data:
